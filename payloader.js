@@ -114,7 +114,7 @@ window.debugCORS = function() {
     });
 };
 
-// METHOD 1: Form submission with proper multipart encoding
+// METHOD 1: Form submission with proper multipart encoding - PRESERVES FILENAME
 window.uploadViaForm = function() {
     const url = document.getElementById('uploadUrl').value;
     const fieldName = document.getElementById('fieldName').value;
@@ -149,19 +149,16 @@ window.uploadViaForm = function() {
     form.enctype = 'multipart/form-data';  // CRITICAL for file uploads
     form.target = uploadId;
     
-    // We need to create a NEW file input and copy the file
-    // The original file input can't be moved because it's a special element
-    const newFileInput = document.createElement('input');
-    newFileInput.type = 'file';
-    newFileInput.name = fieldName;
-    newFileInput.style.display = 'none';
+    // Instead of cloning the file input, we'll move the original one
+    // But we need to detach it from its current position first
+    const parent = fileInput.parentNode;
+    const nextSibling = fileInput.nextSibling;
     
-    // This is the trick - we need to use DataTransfer to set the file
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
-    newFileInput.files = dataTransfer.files;
-    
-    form.appendChild(newFileInput);
+    // Remove from current position and add to form
+    fileInput.remove();
+    fileInput.name = fieldName; // Ensure correct field name
+    fileInput.style.display = 'none'; // Hide it
+    form.appendChild(fileInput);
     
     // Add CSRF tokens from any existing forms
     document.querySelectorAll('form input[type="hidden"]').forEach(input => {
@@ -184,7 +181,7 @@ window.uploadViaForm = function() {
             status.innerHTML += `📄 Response: ${response.substring(0, 200)}...<br>`;
             
             // Try to extract file URL
-            const match = response.match(/(https?:\/\/[^\s"']+\.(php|html?|jpg|png|gif|txt))/i);
+            const match = response.match(/(https?:\/\/[^\s"']+\.(php|html?|jpg|png|gif|txt|js|css))/i);
             if(match) {
                 status.innerHTML += `🔗 File URL: <a href="${match[0]}" target="_blank" style="color:#0f0;">${match[0]}</a><br>`;
             }
@@ -194,10 +191,21 @@ window.uploadViaForm = function() {
             status.innerHTML += `💡 Check the target server to see if file was uploaded.<br>`;
         }
         
-        // Clean up
+        // Clean up iframe, but restore file input
         setTimeout(() => {
             if(document.body.contains(iframe)) document.body.removeChild(iframe);
-            if(document.body.contains(form)) document.body.removeChild(form);
+            
+            // Restore file input to original position
+            if(parent) {
+                if(nextSibling) {
+                    parent.insertBefore(fileInput, nextSibling);
+                } else {
+                    parent.appendChild(fileInput);
+                }
+            } else {
+                document.body.appendChild(fileInput);
+            }
+            fileInput.style.display = 'block';
         }, 1000);
     };
     
@@ -214,14 +222,14 @@ window.uploadViaForm = function() {
         form.submit();
         status.innerHTML += `⏳ Form submitted, waiting for response...<br>`;
         
-        // Clean up form but keep iframe
+        // Remove form but keep iframe
         setTimeout(() => {
             if(document.body.contains(form)) document.body.removeChild(form);
         }, 100);
     }, 100);
 };
 
-// METHOD 2: Direct form submission (opens in new window)
+// METHOD 2: Direct form submission (opens in new window) - PRESERVES FILENAME
 window.uploadDirect = function() {
     const url = document.getElementById('uploadUrl').value;
     const fieldName = document.getElementById('fieldName').value;
@@ -236,6 +244,7 @@ window.uploadDirect = function() {
     const file = fileInput.files[0];
     
     status.innerHTML = `📤 Opening upload form in new window...<br>`;
+    status.innerHTML += `📁 File: ${file.name} will be uploaded with original filename<br>`;
     
     // Create form with proper multipart encoding
     const form = document.createElement('form');
@@ -244,17 +253,13 @@ window.uploadDirect = function() {
     form.enctype = 'multipart/form-data';
     form.target = '_blank'; // Opens in new tab/window
     
-    // Create file input with the selected file
-    const newFileInput = document.createElement('input');
-    newFileInput.type = 'file';
-    newFileInput.name = fieldName;
+    // Move the original file input (preserves filename)
+    const parent = fileInput.parentNode;
+    const nextSibling = fileInput.nextSibling;
     
-    // Copy the file using DataTransfer
-    const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(file);
-    newFileInput.files = dataTransfer.files;
-    
-    form.appendChild(newFileInput);
+    fileInput.remove();
+    fileInput.name = fieldName;
+    form.appendChild(fileInput);
     
     // Add hidden fields
     document.querySelectorAll('form input[type="hidden"]').forEach(input => {
@@ -270,13 +275,27 @@ window.uploadDirect = function() {
     // Submit form
     document.body.appendChild(form);
     form.submit();
+    
+    // Restore file input
+    if(parent) {
+        if(nextSibling) {
+            parent.insertBefore(fileInput, nextSibling);
+        } else {
+            parent.appendChild(fileInput);
+        }
+    } else {
+        document.body.appendChild(fileInput);
+    }
+    fileInput.style.display = 'block';
+    
+    // Clean up form
     document.body.removeChild(form);
     
     status.innerHTML += `✅ Form opened in new tab/window<br>`;
     status.innerHTML += `💡 Complete the upload there<br>`;
 };
 
-// METHOD 3: Fetch API (Only works if CORS is enabled)
+// METHOD 3: Fetch API (Only works if CORS is enabled) - PRESERVES FILENAME
 window.uploadViaFetch = async function() {
     const url = document.getElementById('uploadUrl').value;
     const fieldName = document.getElementById('fieldName').value;
@@ -291,10 +310,11 @@ window.uploadViaFetch = async function() {
     const file = fileInput.files[0];
     
     status.innerHTML = `🌐 Trying fetch upload to ${url}...<br>`;
+    status.innerHTML += `📁 File: ${file.name} (original filename preserved)<br>`;
     status.innerHTML += `⚠️ This only works if target server has CORS enabled!<br>`;
     
     const formData = new FormData();
-    formData.append(fieldName, file);
+    formData.append(fieldName, file); // This preserves the original filename
     
     // Add any existing form data
     document.querySelectorAll('form input[type="hidden"]').forEach(input => {
