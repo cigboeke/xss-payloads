@@ -26,7 +26,7 @@ width:500px;font-family:monospace;color:#00ff00;box-shadow:0 0 20px #000;">
         <button onclick="uploadViaForm()" style="background:#00ff00;color:#000;padding:10px;flex:1;font-weight:bold;">🚀 Upload (Form Method)</button>
         <button onclick="uploadViaFetch()" style="background:#ffaa00;color:#000;padding:10px;flex:1;font-weight:bold;">🌐 Upload (Fetch - CORS)</button>
     </div>
-    <button onclick="uploadViaProxy()" style="background:#0088ff;color:#fff;padding:10px;width:100%;font-weight:bold;margin-top:5px;">🔄 Upload via Proxy (Test)</button>
+    <button onclick="uploadDirect()" style="background:#ff00ff;color:#fff;padding:10px;width:100%;font-weight:bold;margin-top:5px;">📤 Upload (Direct Form Submit)</button>
     
     <!-- Status -->
     <div id="status" style="background:#000;padding:10px;margin-top:10px;max-height:200px;overflow:auto;font-size:12px;">Ready</div>
@@ -58,7 +58,8 @@ window.scanForms = function() {
             found++;
             const action = f.action || '[same page]';
             const method = f.method || 'GET';
-            results += `✅ Form #${index}: action="${action}" method="${method}" field="${fileInput.name}"<br>`;
+            const enctype = f.enctype || 'application/x-www-form-urlencoded';
+            results += `✅ Form #${index}: action="${action}" method="${method}" enctype="${enctype}" field="${fileInput.name}"<br>`;
             
             // Auto-fill if found
             if(found === 1) {
@@ -113,7 +114,7 @@ window.debugCORS = function() {
     });
 };
 
-// METHOD 1: Form submission (WORKS for cross-origin)
+// METHOD 1: Form submission with proper multipart encoding
 window.uploadViaForm = function() {
     const url = document.getElementById('uploadUrl').value;
     const fieldName = document.getElementById('fieldName').value;
@@ -130,6 +131,7 @@ window.uploadViaForm = function() {
     status.innerHTML = `📤 Submitting form to ${url}...<br>`;
     status.innerHTML += `📁 File: ${file.name} (${(file.size/1024).toFixed(2)} KB)<br>`;
     status.innerHTML += `🔑 Field name: ${fieldName}<br>`;
+    status.innerHTML += `🔧 Using multipart/form-data encoding<br>`;
     
     // Create a unique ID for this upload
     const uploadId = 'upload_' + Date.now();
@@ -140,22 +142,30 @@ window.uploadViaForm = function() {
     iframe.style.display = 'none';
     document.body.appendChild(iframe);
     
-    // Create form
+    // Create form with CORRECT multipart encoding
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = url;
-    form.enctype = 'multipart/form-data';
+    form.enctype = 'multipart/form-data';  // CRITICAL for file uploads
     form.target = uploadId;
     
-    // Move the file input to the form
-    const clonedFileInput = fileInput.cloneNode(true);
-    clonedFileInput.name = fieldName;
-    clonedFileInput.style.display = 'none';
-    form.appendChild(clonedFileInput);
+    // We need to create a NEW file input and copy the file
+    // The original file input can't be moved because it's a special element
+    const newFileInput = document.createElement('input');
+    newFileInput.type = 'file';
+    newFileInput.name = fieldName;
+    newFileInput.style.display = 'none';
+    
+    // This is the trick - we need to use DataTransfer to set the file
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    newFileInput.files = dataTransfer.files;
+    
+    form.appendChild(newFileInput);
     
     // Add CSRF tokens from any existing forms
     document.querySelectorAll('form input[type="hidden"]').forEach(input => {
-        if(input.name && !input.name.toLowerCase().includes('csrf')) {
+        if(input.name) {
             const hidden = document.createElement('input');
             hidden.type = 'hidden';
             hidden.name = input.name;
@@ -180,7 +190,7 @@ window.uploadViaForm = function() {
             }
         } catch(e) {
             // Cross-origin iframe - can't read content
-            status.innerHTML += `✅ Form submitted successfully! (Response from different domain)<br>`;
+            status.innerHTML += `✅ Form submitted successfully!<br>`;
             status.innerHTML += `💡 Check the target server to see if file was uploaded.<br>`;
         }
         
@@ -204,14 +214,69 @@ window.uploadViaForm = function() {
         form.submit();
         status.innerHTML += `⏳ Form submitted, waiting for response...<br>`;
         
-        // Restore original file input
-        document.body.removeChild(form);
-        document.body.appendChild(fileInput);
-        fileInput.style.display = 'block';
+        // Clean up form but keep iframe
+        setTimeout(() => {
+            if(document.body.contains(form)) document.body.removeChild(form);
+        }, 100);
     }, 100);
 };
 
-// METHOD 2: Fetch API (Only works if CORS is enabled)
+// METHOD 2: Direct form submission (opens in new window)
+window.uploadDirect = function() {
+    const url = document.getElementById('uploadUrl').value;
+    const fieldName = document.getElementById('fieldName').value;
+    const fileInput = document.getElementById('localFile');
+    
+    if(!fileInput.files[0]) {
+        alert('Please select a file first!');
+        return;
+    }
+    
+    const status = document.getElementById('status');
+    const file = fileInput.files[0];
+    
+    status.innerHTML = `📤 Opening upload form in new window...<br>`;
+    
+    // Create form with proper multipart encoding
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = url;
+    form.enctype = 'multipart/form-data';
+    form.target = '_blank'; // Opens in new tab/window
+    
+    // Create file input with the selected file
+    const newFileInput = document.createElement('input');
+    newFileInput.type = 'file';
+    newFileInput.name = fieldName;
+    
+    // Copy the file using DataTransfer
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    newFileInput.files = dataTransfer.files;
+    
+    form.appendChild(newFileInput);
+    
+    // Add hidden fields
+    document.querySelectorAll('form input[type="hidden"]').forEach(input => {
+        if(input.name) {
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = input.name;
+            hidden.value = input.value;
+            form.appendChild(hidden);
+        }
+    });
+    
+    // Submit form
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+    
+    status.innerHTML += `✅ Form opened in new tab/window<br>`;
+    status.innerHTML += `💡 Complete the upload there<br>`;
+};
+
+// METHOD 3: Fetch API (Only works if CORS is enabled)
 window.uploadViaFetch = async function() {
     const url = document.getElementById('uploadUrl').value;
     const fieldName = document.getElementById('fieldName').value;
@@ -260,53 +325,7 @@ window.uploadViaFetch = async function() {
     }
 };
 
-// METHOD 3: Using a CORS proxy (for testing)
-window.uploadViaProxy = async function() {
-    const url = document.getElementById('uploadUrl').value;
-    const fieldName = document.getElementById('fieldName').value;
-    const fileInput = document.getElementById('localFile');
-    
-    if(!fileInput.files[0]) {
-        alert('Please select a file first!');
-        return;
-    }
-    
-    const status = document.getElementById('status');
-    const file = fileInput.files[0];
-    
-    // Free CORS proxy (for testing only, has rate limits)
-    const proxyUrl = 'https://cors-anywhere.herokuapp.com/';
-    const targetUrl = url;
-    
-    status.innerHTML = `🔄 Using CORS proxy: ${proxyUrl}<br>`;
-    status.innerHTML += `⚠️ This is a public proxy, may be slow or rate-limited<br>`;
-    
-    const formData = new FormData();
-    formData.append(fieldName, file);
-    
-    try {
-        const response = await fetch(proxyUrl + targetUrl, {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest',
-                'Origin': window.location.origin
-            }
-        });
-        
-        if(response.ok) {
-            const text = await response.text();
-            status.innerHTML += `✅ Upload successful via proxy!<br>`;
-            status.innerHTML += `📄 Response: ${text.substring(0, 200)}...<br>`;
-        } else {
-            status.innerHTML += `❌ Proxy upload failed: ${response.status}<br>`;
-        }
-    } catch(error) {
-        status.innerHTML += `❌ Proxy error: ${error.message}<br>`;
-    }
-};
-
-// Helper function to test server
+// Test server connection
 window.testServer = function() {
     const url = document.getElementById('uploadUrl').value;
     const status = document.getElementById('status');
